@@ -7,14 +7,22 @@
 //
 
 import UIKit
+import Alamofire
 
-class ViewController: UIViewController, UITableViewDataSource, UITableViewDelegate, NSURLConnectionDelegate, NSURLConnectionDataDelegate {
+class ViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
     
     @IBOutlet var appsTableView : UITableView!
     
+    var page : Int = 1 {
+        didSet {
+            self.addingDataInProcess = true
+            getResultsFromAPI()
+        }
+    }
     var data: NSMutableData = NSMutableData()
     var tableData = NSMutableArray()
     var imageCache = [String:UIImage]()
+    var addingDataInProcess = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -67,9 +75,9 @@ class ViewController: UIViewController, UITableViewDataSource, UITableViewDelega
         var saleOfferPrice : String = ""
         if (rowData["saleOffer"] as? NSDictionary) != nil {
             if ((rowData["saleOffer"] as! NSDictionary)["kind"] as? String) != nil {
-                saleOfferKind = ((rowData["saleOffer"] as! NSDictionary)["kind"] as! String) + ",   "
-                if saleOfferKind == "direct_sell,   " {
-                    saleOfferKind = "Продажа,   "
+                saleOfferKind = ((rowData["saleOffer"] as! NSDictionary)["kind"] as! String) + ", "
+                if saleOfferKind == "direct_sell, " {
+                    saleOfferKind = "Продажа, "
                 }
             }
             if ((rowData["saleOffer"] as! NSDictionary)["price"] as? NSNumber) != nil {
@@ -114,53 +122,51 @@ class ViewController: UIViewController, UITableViewDataSource, UITableViewDelega
         return cell
     }
     
+    func scrollViewDidScroll(scrollView: UIScrollView) {
+        let offset = scrollView.contentOffset
+        let bounds = scrollView.bounds
+        let size = scrollView.contentSize
+        let inset = scrollView.contentInset
+        let y = offset.y + bounds.size.height - inset.bottom
+        let h = size.height
+        if y > h + 10 {
+            if !self.addingDataInProcess {
+                self.page += 1
+            }
+        }
+    }
+    
     func getResultsFromAPI() {
-        let urlPath = "https://api.jqestate.ru/v1/properties/country?pagination[offset]=32"
-        let url: NSURL = NSURL(string: urlPath)!
-        let session = NSURLSession.sharedSession()
-        let task = session.dataTaskWithURL(url, completionHandler: {data, response, error -> Void in
-            print("Task completed")
-            if((error) != nil) {
-                print(error!.localizedDescription)
-            }
-            var jsonResult : NSDictionary!
-            do {
-            jsonResult = try NSJSONSerialization.JSONObjectWithData(data!, options: NSJSONReadingOptions.MutableContainers) as! NSDictionary
-            }
-            catch {
-                print(error)
-            }
-            let results = jsonResult["items"] as! NSMutableArray
-            dispatch_async(dispatch_get_main_queue(), {
-                self.tableData = results
-                self.appsTableView.reloadData()
-            })
-        })
-        task.resume()
-    }
-
-    func connection(didReceiveResponse: NSURLConnection, didReceiveResponse response: NSURLResponse) {
-        self.data = NSMutableData()
+        print("Страниц: " + String(self.page))
+        Alamofire.request(
+            .GET,
+            "https://api.jqestate.ru/v1/properties/country",
+            parameters: ["pagination[offset]": String(self.page * 32)],
+            encoding: .URL)
+            .validate()
+            .responseJSON { (response) -> Void in
+                guard response.result.isSuccess else {
+                    print("Error while getting data: \(response.result.error)")
+                    self.addingDataInProcess = false
+                    return
+                }
+                
+                guard let value = response.result.value as? [String: AnyObject],
+                    rows = value["items"] as? NSMutableArray else {
+                        print("Data receive fail")
+                        self.addingDataInProcess = false
+                        return
+                }
+                self.addData(rows)
+                self.addingDataInProcess = false
+        }
     }
     
-    func connection(connection: NSURLConnection, didReceiveData data: NSData) {
-        self.data.appendData(data)
-    }
-    
-    func connectionDidFinishLoading(connection: NSURLConnection) {
-        var jsonResult : NSDictionary!
-        do {
-        jsonResult = try NSJSONSerialization.JSONObjectWithData(data, options: NSJSONReadingOptions.MutableContainers) as! NSDictionary
+    func addData(data: NSMutableArray) {
+        for eachObject in data {
+            self.tableData.addObject(eachObject)
         }
-        catch {
-            print(error)
-        }
-        
-        if jsonResult.count>0 && jsonResult["items"]!.count>0 {
-            let results: NSMutableArray = jsonResult["items"] as! NSMutableArray
-            self.tableData = results
-            self.appsTableView.reloadData()
-        }
+        self.appsTableView.reloadData()
     }
 
 }
